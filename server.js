@@ -988,16 +988,18 @@ app.get('/api/dashboard', wrap((req, res) => {
 app.get('/api/reports/:type', wrap((req, res) => {
   res.json(buildReport(req.params.type, req.query));
 }));
+// safe client message: keep intentional (status-carrying) errors, generic-ize the rest
+const safeErr = (e) => (e.status ? e.message : 'Something went wrong. Please try again.');
 app.get('/api/export/excel/:type', (req, res) => {
   exportExcel(req.params.type, req.query, res).catch((e) => {
     console.error(e);
-    if (!res.headersSent) res.status(500).json({ error: e.message });
+    if (!res.headersSent) res.status(e.status || 500).json({ error: safeErr(e) });
   });
 });
 app.get('/api/export/pdf/:type', (req, res) => {
   try { exportPdf(req.params.type, req.query, res); } catch (e) {
     console.error(e);
-    if (!res.headersSent) res.status(500).json({ error: e.message });
+    if (!res.headersSent) res.status(e.status || 500).json({ error: safeErr(e) });
   }
 });
 
@@ -1006,7 +1008,7 @@ app.post('/api/ai/chat', (req, res) => {
   const { messages } = req.body;
   aiChat(messages || [], req.user.id)
     .then((result) => res.json(result))
-    .catch((e) => { console.error(e); res.status(500).json({ error: e.message }); });
+    .catch((e) => { console.error(e); res.status(e.status || 500).json({ error: safeErr(e) }); });
 });
 
 // ---------- helpers ----------
