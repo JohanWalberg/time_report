@@ -12,6 +12,15 @@ const { aiChat } = require('./lib/ai');
 const app = express();
 const PORT = process.env.PORT || 3020;
 
+app.disable('x-powered-by');
+app.set('trust proxy', 1); // so req.secure reflects X-Forwarded-Proto behind a TLS proxy
+// Baseline security headers (kept CSP-free: the UI relies on inline handlers/styles)
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  next();
+});
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -32,18 +41,28 @@ app.use('/api', (req, res, next) => {
 
 const UPLOAD_DIR = path.join(__dirname, 'data', 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+// Block script/executable/renderable-HTML extensions — everything else (docs, images,
+// archives, PDFs) is fine and served as an attachment download anyway.
+const BLOCKED_UPLOAD_EXT = /\.(html?|xhtml|svg|js|mjs|exe|bat|cmd|com|sh|ps1|msi|scr|vbs|jar)$/i;
 const upload = multer({
   storage: multer.diskStorage({
     destination: UPLOAD_DIR,
     filename: (req, file, cb) => cb(null, `${Date.now()}-${Math.round(Math.random() * 1e6)}-${file.originalname.replace(/[^\w.\-]/g, '_')}`),
   }),
   limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (BLOCKED_UPLOAD_EXT.test(file.originalname)) cb(Object.assign(new Error('That file type is not allowed'), { status: 400 }));
+    else cb(null, true);
+  },
 });
 
 const wrap = (fn) => (req, res) => {
   try { fn(req, res); } catch (e) {
     console.error(e);
-    res.status(e.status || 500).json({ error: e.message });
+    // Intentional errors (bad(), 401/403) carry a status and a safe message.
+    // Anything else is unexpected — don't leak internal/SQLite detail to the client.
+    if (e.status) res.status(e.status).json({ error: e.message });
+    else res.status(500).json({ error: 'Something went wrong. Please try again.' });
   }
 };
 const bad = (msg) => { const e = new Error(msg); e.status = 400; return e; };
@@ -53,12 +72,30 @@ const { hashPassword, verifyPassword, newToken } = require('./lib/pw');
 const SESSION_DAYS = 30;
 const parseCookies = (req) => Object.fromEntries(
   (req.headers.cookie || '').split(';').map((c) => c.trim().split('=').map(decodeURIComponent)).filter((a) => a[0]));
-const setSession = (res, userId) => {
+const setSession = (req, res, userId) => {
   const token = newToken();
   db.prepare(`INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, datetime('now', '+${SESSION_DAYS} days'))`).run(token, userId);
-  res.setHeader('Set-Cookie', `tp_session=${token}; HttpOnly; Path=/; Max-Age=${SESSION_DAYS * 86400}; SameSite=Lax`);
+  // Secure only over HTTPS — omitting it on plain-HTTP localhost keeps dev logins working
+  const secure = req.secure ? ' Secure;' : '';
+  res.setHeader('Set-Cookie', `tp_session=${token}; HttpOnly;${secure} Path=/; Max-Age=${SESSION_DAYS * 86400}; SameSite=Lax`);
 };
 const publicUser = (u) => u && { id: u.id, name: u.name, email: u.email, role: u.role, team_id: u.team_id, color: u.color, capacity_hours: u.capacity_hours, skills: u.skills, settings: u.settings || '{}' };
+
+// Simple in-memory login throttle: max 10 failed attempts per IP+email per 15 min
+const loginAttempts = new Map();
+const throttleKey = (req, email) => `${req.ip}|${String(email || '').toLowerCase()}`;
+function checkLoginRate(req, email) {
+  const rec = loginAttempts.get(throttleKey(req, email));
+  if (rec && rec.count >= 10 && Date.now() - rec.first < 15 * 60 * 1000) {
+    const e = new Error('Too many failed attempts. Wait 15 minutes and try again.'); e.status = 429; throw e;
+  }
+}
+function noteLoginFail(req, email) {
+  const k = throttleKey(req, email);
+  const rec = loginAttempts.get(k);
+  if (!rec || Date.now() - rec.first > 15 * 60 * 1000) loginAttempts.set(k, { count: 1, first: Date.now() });
+  else rec.count++;
+}
 
 // First-run setup: while the database has no users, the login page offers a
 // "create admin account" form instead. Disabled forever after the first user exists.
@@ -69,21 +106,24 @@ app.post('/api/auth/setup', wrap((req, res) => {
   const { name, email, password } = req.body;
   if (!name || !name.trim()) throw bad('Your name is required');
   if (!email || !/^\S+@\S+\.\S+$/.test(String(email).trim())) throw bad('A valid email is required');
-  if (!password || password.length < 6) throw bad('Password must be at least 6 characters');
+  if (!password || password.length < 8) throw bad('Password must be at least 8 characters');
   const id = db.prepare('INSERT INTO users (name, email, role, password_hash, color) VALUES (?,?,?,?,?)')
     .run(name.trim(), String(email).trim(), 'admin', hashPassword(password), '#5e6ad2').lastInsertRowid;
-  setSession(res, id);
+  setSession(req, res, id);
   res.status(201).json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)));
 }));
 
 app.post('/api/auth/login', wrap((req, res) => {
   const { email, password } = req.body;
+  checkLoginRate(req, email);
   const user = db.prepare('SELECT * FROM users WHERE lower(email) = lower(?) AND active = 1').get(String(email || '').trim());
   if (!user || !verifyPassword(password, user.password_hash)) {
+    noteLoginFail(req, email);
     const e = new Error('Wrong email or password'); e.status = 401; throw e;
   }
+  loginAttempts.delete(throttleKey(req, email));
   db.prepare("DELETE FROM sessions WHERE expires_at < datetime('now')").run();
-  setSession(res, user.id);
+  setSession(req, res, user.id);
   res.json(publicUser(user));
 }));
 app.post('/api/auth/logout', wrap((req, res) => {
@@ -104,13 +144,13 @@ app.post('/api/auth/join', wrap((req, res) => {
   const inv = db.prepare('SELECT * FROM invites WHERE token = ? AND accepted_at IS NULL').get(token || '');
   if (!inv) throw bad('This invite link is invalid or has already been used');
   if (!name || !name.trim()) throw bad('Your name is required');
-  if (!password || password.length < 6) throw bad('Password must be at least 6 characters');
+  if (!password || password.length < 8) throw bad('Password must be at least 8 characters');
   if (db.prepare('SELECT 1 FROM users WHERE lower(email) = lower(?)').get(inv.email)) throw bad('A user with this email already exists — sign in instead');
   const colors = ['#5e6ad2', '#4cb782', '#4ea7fc', '#e8945a', '#b48ef2', '#26b5ce', '#eb5757', '#f2c94c'];
   const id = db.prepare('INSERT INTO users (name, email, role, team_id, password_hash, color) VALUES (?,?,?,?,?,?)')
     .run(name.trim(), inv.email, inv.role, inv.team_id, hashPassword(password), colors[Math.floor(Math.random() * colors.length)]).lastInsertRowid;
   db.prepare("UPDATE invites SET accepted_at = datetime('now') WHERE id = ?").run(inv.id);
-  setSession(res, id);
+  setSession(req, res, id);
   res.status(201).json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)));
 }));
 
@@ -181,36 +221,48 @@ app.get('/api/teams', wrap((req, res) => {
     FROM teams t ORDER BY t.name`).all());
 }));
 app.post('/api/teams', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   const { name, description = '', color = '#6366f1' } = req.body;
   if (!name) throw bad('Team name is required');
   const id = db.prepare('INSERT INTO teams (name, description, color) VALUES (?,?,?)').run(name, description, color).lastInsertRowid;
   res.status(201).json(db.prepare('SELECT * FROM teams WHERE id = ?').get(id));
 }));
 app.patch('/api/teams/:id', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   patchRow('teams', req.params.id, req.body, ['name', 'description', 'color']);
   res.json(db.prepare('SELECT * FROM teams WHERE id = ?').get(req.params.id));
 }));
 app.delete('/api/teams/:id', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   db.prepare('DELETE FROM teams WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 }));
 
 // ---------- Users ----------
 app.get('/api/users', wrap((req, res) => {
-  res.json(db.prepare(`
+  // publicUser mapping — never expose password_hash
+  const rows = db.prepare(`
     SELECT u.*, t.name AS team_name FROM users u LEFT JOIN teams t ON t.id = u.team_id
-    WHERE u.active = 1 ORDER BY u.name`).all());
+    WHERE u.active = 1 ORDER BY u.name`).all();
+  res.json(rows.map((u) => ({ ...publicUser(u), team_name: u.team_name })));
 }));
 app.post('/api/users', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   const { name, email, role = 'member', team_id = null, skills = '', capacity_hours = 40, color = '#0ea5e9' } = req.body;
   if (!name || !email) throw bad('Name and email are required');
   const id = db.prepare('INSERT INTO users (name, email, role, team_id, skills, capacity_hours, color) VALUES (?,?,?,?,?,?,?)')
     .run(name, email, role, team_id, skills, capacity_hours, color).lastInsertRowid;
-  res.status(201).json(db.prepare('SELECT * FROM users WHERE id = ?').get(id));
+  res.status(201).json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(id)));
 }));
 app.patch('/api/users/:id', wrap((req, res) => {
-  patchRow('users', req.params.id, req.body, ['name', 'email', 'role', 'team_id', 'skills', 'capacity_hours', 'color', 'active', 'settings']);
-  res.json(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id));
+  const isMgr = ['admin', 'manager'].includes(req.user.role);
+  const isSelf = String(req.user.id) === String(req.params.id);
+  // Members may edit ONLY their own personal preferences — never role/active/email/team.
+  const allowed = isMgr ? ['name', 'email', 'role', 'team_id', 'skills', 'capacity_hours', 'color', 'active', 'settings']
+    : isSelf ? ['settings', 'color'] : [];
+  if (!allowed.length) throw Object.assign(new Error('You can only edit your own settings'), { status: 403 });
+  patchRow('users', req.params.id, req.body, allowed);
+  res.json(publicUser(db.prepare('SELECT * FROM users WHERE id = ?').get(req.params.id)));
 }));
 
 // ---------- User profile: personal engagement & involvement breakdown ----------
@@ -345,7 +397,17 @@ app.get('/api/projects/:id', wrap((req, res) => {
   project.tickets = ticketQuery('WHERE k.project_id = ?', [project.id]);
   res.json(project);
 }));
+// Batch: milestones + tickets for several projects in one round-trip (roadmap avoids N+1)
+app.get('/api/projects-detail', wrap((req, res) => {
+  const ids = String(req.query.ids || '').split(',').map((x) => parseInt(x, 10)).filter(Boolean).slice(0, 200);
+  res.json(ids.map((id) => ({
+    id,
+    milestones: db.prepare('SELECT * FROM milestones WHERE project_id = ? ORDER BY sort_order, due_date').all(id),
+    tickets: ticketQuery('WHERE k.project_id = ?', [id]),
+  })));
+}));
 app.post('/api/projects', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   const { name, description = '', owner_id = null, team_id = null, start_date = null, deadline = null, status = 'planning', priority = 'medium' } = req.body;
   if (!name) throw bad('Project name is required');
   const id = db.prepare(`INSERT INTO projects (name, description, owner_id, team_id, start_date, deadline, status, priority, sort_order)
@@ -358,12 +420,14 @@ app.patch('/api/projects/:id', wrap((req, res) => {
   res.json(db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id));
 }));
 app.delete('/api/projects/:id', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 }));
 
 // ---------- Milestones ----------
 app.post('/api/milestones', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   const { project_id, name, description = '', due_date = null, status = 'planned', sort_order = 0 } = req.body;
   if (!project_id || !name) throw bad('project_id and name are required');
   const id = db.prepare('INSERT INTO milestones (project_id, name, description, due_date, status, sort_order) VALUES (?,?,?,?,?,?)')
@@ -371,10 +435,12 @@ app.post('/api/milestones', wrap((req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM milestones WHERE id = ?').get(id));
 }));
 app.patch('/api/milestones/:id', wrap((req, res) => {
+  // open to any member: roadmap drag shifts milestone dates, and status can be cycled inline
   patchRow('milestones', req.params.id, req.body, ['name', 'description', 'due_date', 'status', 'sort_order']);
   res.json(db.prepare('SELECT * FROM milestones WHERE id = ?').get(req.params.id));
 }));
 app.delete('/api/milestones/:id', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   db.prepare('DELETE FROM milestones WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 }));
@@ -455,6 +521,12 @@ app.patch('/api/tickets/:id', wrap((req, res) => {
   res.json(ticketQuery('WHERE k.id = ?', [req.params.id])[0]);
 }));
 app.delete('/api/tickets/:id', wrap((req, res) => {
+  // deletion is destructive (cascades comments/activity/attachments) — managers, or the ticket's creator
+  const t = db.prepare('SELECT created_by FROM tickets WHERE id = ?').get(req.params.id);
+  if (!t) throw bad('Ticket not found');
+  if (!['admin', 'manager'].includes(req.user.role) && t.created_by !== req.user.id) {
+    throw Object.assign(new Error('Only a manager or the ticket creator can delete this ticket'), { status: 403 });
+  }
   db.prepare('DELETE FROM tickets WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 }));
@@ -500,6 +572,7 @@ app.get('/api/statuses', wrap((req, res) => {
   res.json(merged);
 }));
 app.post('/api/projects/:id/statuses', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager'); // adding a column changes the board for everyone
   const { label, category = 'open', after } = req.body;
   if (!label || !label.trim()) throw bad('Status name is required');
   if (!['open', 'done'].includes(category)) throw bad("category must be 'open' or 'done'");
@@ -525,10 +598,12 @@ app.post('/api/projects/:id/statuses', wrap((req, res) => {
   res.status(201).json(db.prepare('SELECT * FROM project_statuses WHERE id = ?').get(id));
 }));
 app.patch('/api/project-statuses/:id', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager'); // reordering columns is a workflow change for everyone
   patchRow('project_statuses', req.params.id, req.body, ['label', 'category', 'sort_order']);
   res.json(db.prepare('SELECT * FROM project_statuses WHERE id = ?').get(req.params.id));
 }));
 app.delete('/api/project-statuses/:id', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager');
   const s = db.prepare('SELECT * FROM project_statuses WHERE id = ?').get(req.params.id);
   if (!s) throw bad('Status not found');
   const inUse = db.prepare('SELECT COUNT(*) n FROM tickets WHERE project_id = ? AND status = ?').get(s.project_id, s.key).n;
@@ -548,6 +623,7 @@ const maskConfig = (config) => {
   return c;
 };
 app.get('/api/integrations', wrap((req, res) => {
+  requireRole(req, 'admin', 'manager'); // config includes (masked) secrets — managers only
   const rows = db.prepare(`SELECT i.*, u.name AS connected_by_name FROM integrations i
     LEFT JOIN users u ON u.id = i.connected_by`).all();
   res.json(rows.map((r) => ({
@@ -946,4 +1022,15 @@ function patchRow(table, id, body, allowed) {
 function logActivity(ticketId, userId, type, detail) {
   db.prepare('INSERT INTO activity (ticket_id, user_id, type, detail) VALUES (?,?,?,?)').run(ticketId, userId || null, type, detail);
 }
+// Final error handler — catches multer errors and anything passed to next(err),
+// returning JSON instead of Express's default HTML error page. No internal leak.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  console.error(err);
+  const status = err.status || (err.code === 'LIMIT_FILE_SIZE' ? 400 : 500);
+  const msg = err.status ? err.message
+    : err.code === 'LIMIT_FILE_SIZE' ? 'File too large (max 20 MB)'
+    : 'Something went wrong. Please try again.';
+  res.status(status).json({ error: msg });
+});
 app.listen(PORT, () => console.log(`TimePort running at http://localhost:${PORT}`));

@@ -249,6 +249,12 @@ if (ticketsDef && ticketsDef.sql.includes("status IN ('backlog'")) {
 db.exec(`
 CREATE INDEX IF NOT EXISTS idx_tickets_project ON tickets(project_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee_id);
+CREATE INDEX IF NOT EXISTS idx_activity_ticket ON activity(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_activity_user ON activity(user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_comments_ticket ON comments(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_time_ticket ON time_entries(ticket_id);
+CREATE INDEX IF NOT EXISTS idx_time_project ON time_entries(project_id);
+CREATE INDEX IF NOT EXISTS idx_highlights_user_week ON highlights(user_id, week);
 `);
 
 // Normalization: all stored text starts with a capital letter (idempotent, runs each boot)

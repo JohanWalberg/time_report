@@ -21,6 +21,15 @@ async function api(path, opts = {}) {
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Only allow safe link schemes — blocks javascript:/data:/vbscript: URLs in user-supplied
+// links (ticket link field, markdown links). Returns '#' for anything not clearly safe.
+const safeUrl = (u) => {
+  const s = String(u ?? '').trim();
+  if (/^(https?:|mailto:|\/|#)/i.test(s) && !/^\s*(javascript|data|vbscript):/i.test(s)) return s;
+  return '#';
+};
+// role helper — mirrors the server-side requireRole gates so members don't see buttons that 403
+const isMgr = () => ['admin', 'manager'].includes(S.currentUser?.role);
 const cap = (s) => typeof s === 'string' ? s.replace(/^(\s*)(\p{Ll})/u, (m, ws, ch) => ws + ch.toUpperCase()) : s;
 const initials = (name) => (name || '?').split(' ').map((p) => p[0]).slice(0, 2).join('').toUpperCase();
 const avatar = (name, color) => `<span class="avatar" style="background:${esc(color || '#6b7280')}" title="${esc(name || 'Unassigned')}">${esc(initials(name))}</span>`;
@@ -83,8 +92,9 @@ function md(text) {
       .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
       // export links download directly (a _blank tab would just sit empty while the file saves).
       // GPT models sometimes prefix URLs with "sandbox:" (a code-interpreter habit) — strip it.
+      // safeUrl() blocks javascript:/data: schemes (stored-XSS via ticket descriptions / AI replies).
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (m, txt, href) => {
-        href = href.replace(/^sandbox:/i, '');
+        href = safeUrl(href.replace(/^sandbox:/i, ''));
         return href.includes('/api/export/')
           ? `<a href="${href}" download>⬇ ${txt}</a>`
           : `<a href="${href}" target="_blank" rel="noopener">${txt}</a>`;
@@ -609,7 +619,7 @@ async function pageProfile(userId) {
 // ================= PROJECTS =================
 async function pageProjects() {
   S.projects = await api('/api/projects');
-  $('#topbarActions').innerHTML = `<button class="btn primary" onclick="openProjectForm()">+ New project</button>`;
+  $('#topbarActions').innerHTML = isMgr() ? `<button class="btn primary" onclick="openProjectForm()">+ New project</button>` : '';
   if (!S.projects.length) {
     $('#content').innerHTML = `<div class="card empty"><div class="big">📁</div><p>No projects yet. Create your first project to start planning work.</p><button class="btn primary" onclick="openProjectForm()">+ Create project</button></div>`;
     return;
@@ -651,27 +661,27 @@ window.openProject = async function (id) {
       <span class="k">Timeline</span><span>${dstr(p.start_date)} → ${dstr(p.deadline)}</span>
       <span class="k">Progress</span><span><div class="bar-track progress-lg" style="width:180px;display:inline-block;vertical-align:middle"><div class="bar-fill" style="width:${pct}%"></div></div> ${pct}%</span>
     </div>
-    <div class="spread"><b class="small">Milestones</b><button class="btn sm" onclick="openMilestoneForm(${p.id})">+ Milestone</button></div>
+    <div class="spread"><b class="small">Milestones</b>${isMgr() ? `<button class="btn sm" onclick="openMilestoneForm(${p.id})">+ Milestone</button>` : ''}</div>
     <table class="data mb"><tbody>
       ${p.milestones.map((m) => `<tr><td><b>${esc(m.name)}</b><div class="small muted">${esc(m.description || '')}</div></td><td>${dstr(m.due_date)}</td><td>${badge(m.status)}</td>
         <td style="text-align:right"><button class="btn sm" onclick="cycleMilestone(${m.id},'${esc(m.status)}',${p.id})" title="Advance status">→</button></td></tr>`).join('') || '<tr><td class="muted small">No milestones yet</td></tr>'}
     </tbody></table>
-    <div class="spread" style="margin-top:14px"><b class="small">Workflow statuses</b><span class="small muted">order here = column order on the board</span></div>
+    <div class="spread" style="margin-top:14px"><b class="small">Workflow statuses</b>${isMgr() ? '<span class="small muted">order here = column order on the board</span>' : ''}</div>
     <div class="flex" style="flex-wrap:wrap;gap:6px;margin:8px 0 10px">
-      ${pStatuses.map((s) => s.custom
+      ${pStatuses.map((s) => s.custom && isMgr()
         ? `<span class="badge b-${esc(s.key)}" style="display:inline-flex;align-items:center;gap:5px">
             <a class="tp-x" onclick="moveProjectStatus(${s.id}, -1, ${p.id})" title="Move earlier in the workflow">‹</a>${esc(s.label)}${s.category === 'done' ? ' ✓' : ''}<a class="tp-x" onclick="moveProjectStatus(${s.id}, 1, ${p.id})" title="Move later in the workflow">›</a>
             <a class="tp-x" onclick="deleteProjectStatus(${s.id}, ${p.id})" title="Remove status">×</a></span>`
-        : `<span class="badge b-${esc(s.key)}" title="Built-in status">${esc(s.label)}</span>`).join('')}
+        : `<span class="badge b-${esc(s.key)}" title="${s.custom ? 'Custom status' : 'Built-in status'}">${esc(s.label)}${s.custom && s.category === 'done' ? ' ✓' : ''}</span>`).join('')}
     </div>
-    <form class="flex" style="margin-bottom:14px;flex-wrap:wrap" onsubmit="return addProjectStatus(event, ${p.id})">
+    ${isMgr() ? `<form class="flex" style="margin-bottom:14px;flex-wrap:wrap" onsubmit="return addProjectStatus(event, ${p.id})">
       <input name="label" placeholder="New status, e.g. QA, Deployed, Released…" required style="max-width:240px">
       <select name="category" style="max-width:160px"><option value="open">Counts as open</option><option value="done">Counts as done</option></select>
       <select name="after" style="max-width:190px" title="Where the new status goes in the workflow">
         ${pStatuses.map((s) => `<option value="${esc(s.key)}" ${s.key === 'in_review' ? 'selected' : ''}>after ${esc(s.label)}</option>`).join('')}
       </select>
       <button class="btn sm primary">+ Add status</button>
-    </form>
+    </form>` : ''}
     <div class="spread"><b class="small">Tickets (${p.tickets.length})</b>
       <span><a class="btn sm" href="/api/export/excel/project?project_id=${p.id}">⬇ Excel</a>
       <a class="btn sm" href="/api/export/pdf/project?project_id=${p.id}">⬇ PDF</a>
@@ -691,8 +701,8 @@ window.openProject = async function (id) {
       }).join('') || '<tr><td class="muted small">No tickets yet</td></tr>'}
     </tbody></table>
     <div class="modal-actions">
-      <button class="btn danger" onclick="deleteProject(${p.id})">Delete</button>
-      <button class="btn" onclick="openProjectForm(${p.id})">Edit</button>
+      ${isMgr() ? `<button class="btn danger" onclick="deleteProject(${p.id})">Delete</button>
+      <button class="btn" onclick="openProjectForm(${p.id})">Edit</button>` : ''}
       <button class="btn primary" onclick="closeModal()">Close</button>
     </div>`);
 };
@@ -836,9 +846,11 @@ async function pageTickets() {
   if (qp.get('team_id')) $('#fteam').value = qp.get('team_id');
   if (qp.get('priority')) $('#fpriority').value = qp.get('priority');
   if (qp.get('overdue') === '1') $('#foverdue').checked = true;
-  const rerender = () => renderTickets();
+  // debounce the free-text search so we don't fire an API call per keystroke
+  let searchT;
+  const debounced = () => { clearTimeout(searchT); searchT = setTimeout(() => renderTickets(), 250); };
   ['fq', 'fproject', 'fassignee', 'fteam', 'fpriority', 'foverdue'].forEach((id) => {
-    $('#' + id).addEventListener(id === 'fq' ? 'input' : 'change', rerender);
+    $('#' + id).addEventListener(id === 'fq' ? 'input' : 'change', id === 'fq' ? debounced : () => renderTickets());
   });
   await renderTickets();
 }
@@ -878,7 +890,7 @@ async function renderTickets() {
         const statuses = S.meta.ticketStatuses.includes(t.status) ? S.meta.ticketStatuses : [...S.meta.ticketStatuses, t.status];
         return `<tr>
         <td class="small muted tl-title" onclick="openTicket(${t.id})">${esc(t.key)}</td>
-        <td><b class="tl-title" onclick="openTicket(${t.id})" title="Open ticket">${esc(t.title)}</b> ${t.link ? `<a href="${esc(t.link)}" target="_blank" rel="noopener" title="${esc(t.link)}">🔗</a>` : ''}</td>
+        <td><b class="tl-title" onclick="openTicket(${t.id})" title="Open ticket">${esc(t.title)}</b> ${t.link ? `<a href="${esc(safeUrl(t.link))}" target="_blank" rel="noopener" title="${esc(t.link)}">🔗</a>` : ''}</td>
         <td><select class="list-edit" onchange="listSetProject(${t.id}, this.value)">${opts(S.projects, 'id', 'name', t.project_id ?? '', '— No project —')}</select></td>
         <td><select class="list-edit" onchange="quickPatch(${t.id}, 'assignee_id', this.value)">${opts(S.users, 'id', 'name', t.assignee_id ?? '', 'Unassigned')}</select></td>
         <td><select class="list-edit" onchange="quickPatch(${t.id}, 'status', this.value)">${enumOpts(statuses, t.status)}</select></td>
@@ -896,7 +908,7 @@ async function renderTickets() {
     <div class="t">${esc(t.title)}</div>
     <div class="meta">
       <span class="small muted">${esc(t.project_name || '')}</span>
-      <span class="flex" style="gap:5px">${isOverdue(t) ? '<span class="overdue-flag" title="Overdue">⚠</span>' : ''}${t.link ? `<a href="${esc(t.link)}" target="_blank" rel="noopener" title="${esc(t.link)}" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()">🔗</a>` : ''}${t.comment_count ? `<span class="small muted">💬${t.comment_count}</span>` : ''}${t.assignee_name ? avatar(t.assignee_name, t.assignee_color) : ''}</span>
+      <span class="flex" style="gap:5px">${isOverdue(t) ? '<span class="overdue-flag" title="Overdue">⚠</span>' : ''}${t.link ? `<a href="${esc(safeUrl(t.link))}" target="_blank" rel="noopener" title="${esc(t.link)}" onclick="event.stopPropagation()" onpointerdown="event.stopPropagation()">🔗</a>` : ''}${t.comment_count ? `<span class="small muted">💬${t.comment_count}</span>` : ''}${t.assignee_name ? avatar(t.assignee_name, t.assignee_color) : ''}</span>
     </div>
   </div>`;
   const kanbanHtml = (cols, items, laneProject, addForProject) => `<div class="kanban" style="grid-template-columns:repeat(${cols.length + (addForProject ? 1 : 0)}, minmax(185px, 1fr))">${cols.map((sc) => {
@@ -1187,13 +1199,13 @@ window.openTicket = async function (id) {
           <span class="k">Estimate</span><span class="small">${fmtH(t.estimate_hours)}h</span>
           <span class="k">Logged</span><span class="small">${fmtDur(t.logged_hours)} ${remaining >= 0 ? `<span class="muted">(${fmtDur(remaining)} left)</span>` : `<span class="overdue-flag">(${fmtDur(-remaining)} over)</span>`}</span>
           <span class="k">Link</span><span class="small">${t.link
-            ? `<a href="${esc(t.link)}" target="_blank" rel="noopener" title="${esc(t.link)}">🔗 ${esc(linkLabel(t.link))} ↗</a>`
+            ? `<a href="${esc(safeUrl(t.link))}" target="_blank" rel="noopener" title="${esc(t.link)}">🔗 ${esc(linkLabel(t.link))} ↗</a>`
             : `<input type="url" placeholder="Paste a Linear/Jira link…" onchange="quickPatch(${t.id},'link',this.value);setTimeout(()=>openTicket(${t.id}),300)">`}</span>
           <span class="k">Labels</span><span><div class="tagpick" id="detailLabels"></div><input type="hidden" id="detailLabelsVal" value="${esc(t.labels || '')}"></span>
           <span class="k">Created</span><span class="small muted">${esc(t.created_at.slice(0, 10))} by ${esc(t.creator_name || '—')}</span>
         </div>
         <div class="modal-actions">
-          <button class="btn danger sm" onclick="deleteTicket(${t.id})">Delete</button>
+          ${isMgr() || t.created_by === S.currentUser.id ? `<button class="btn danger sm" onclick="deleteTicket(${t.id})">Delete</button>` : ''}
           <button class="btn sm" onclick="openTicketForm(null, ${t.id})">Edit all fields</button>
         </div>
       </div>
@@ -1482,7 +1494,7 @@ async function pageRoadmap() {
   $('#topbarActions').innerHTML = `
     <a class="btn" href="/api/export/excel/roadmap">⬇ Excel</a>
     <a class="btn" href="/api/export/pdf/roadmap">⬇ PDF</a>
-    <button class="btn primary" onclick="openProjectForm()">+ New project</button>`;
+    ${isMgr() ? '<button class="btn primary" onclick="openProjectForm()">+ New project</button>' : ''}`;
   if (!active.length) {
     $('#content').innerHTML = `<div class="card empty"><div class="big">🗺️</div><p>Your roadmap is empty. Create a project with a start date and deadline to see it here.</p><button class="btn primary" onclick="openProjectForm()">+ Create project</button></div>`;
     return;
@@ -1525,7 +1537,8 @@ async function pageRoadmap() {
     cur.setMonth(cur.getMonth() + 1);
   }
   const msColor = { planned: '#62666d', in_progress: '#f2c94c', completed: '#4cb782', at_risk: '#eb5757' };
-  const details = await Promise.all(visible.map((p) => api(`/api/projects/${p.id}`)));
+  // one batched request for all visible projects' milestones + tickets (avoids N+1)
+  const details = visible.length ? await api(`/api/projects-detail?ids=${visible.map((p) => p.id).join(',')}`) : [];
   const milestonesByProject = {}, ticketsByProject = {};
   for (const dp of details) { milestonesByProject[dp.id] = dp.milestones || []; ticketsByProject[dp.id] = dp.tickets || []; }
 
@@ -1971,7 +1984,9 @@ window.setRoadmapYear = (y) => {
 };
 
 // expanded projects on the roadmap (ticket sub-rows), persisted between visits
-const rmOpen = new Set(JSON.parse(localStorage.getItem('tp_roadmap_open') || '[]'));
+const rmOpen = new Set((() => {
+  try { return JSON.parse(localStorage.getItem('tp_roadmap_open') || '[]'); } catch { return []; }
+})());
 window.toggleRoadmapProject = (pid, btn) => {
   const sub = document.querySelector(`.rm-sub[data-id="${pid}"]`);
   const open = sub.hidden;
