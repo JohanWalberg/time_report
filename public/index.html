@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TimePort — Time & Projects</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏱️</text></svg>">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="logo">⏱️ <span>TimePort</span></div>
+      <nav id="nav">
+        <a href="#" onclick="openQuickSearch();return false" title="Quick search (Ctrl+K)">🔍 <span>Search</span><kbd class="qs-kbd" style="margin-left:auto">Ctrl K</kbd></a>
+        <a href="#/dashboard" data-page="dashboard">📊 <span>Dashboard</span></a>
+        <a href="#/me" data-page="me">👤 <span>My work</span></a>
+        <a href="#/projects" data-page="projects">📁 <span>Projects</span></a>
+        <a href="#/tickets" data-page="tickets">🎫 <span>Tickets</span></a>
+        <a href="#/roadmap" data-page="roadmap">🗺️ <span>Roadmap</span></a>
+        <a href="#/time" data-page="time">⏰ <span>Time</span></a>
+        <a href="#/reports" data-page="reports">📑 <span>Reports</span></a>
+        <a href="#/ai" data-page="ai">✨ <span>AI Assistant</span></a>
+        <a href="#/integrations" data-page="integrations">🔌 <span>Integrations</span></a>
+        <a href="#/settings" data-page="settings">⚙️ <span>Settings</span></a>
+      </nav>
+      <div id="starredNav"></div>
+      <div id="timerWidget"></div>
+      <div class="sidebar-footer" id="sidebarUser"></div>
+    </aside>
+    <main class="main">
+      <header class="topbar">
+        <h1 id="pageTitle">Dashboard</h1>
+        <div class="topbar-actions" id="topbarActions"></div>
+      </header>
+      <div class="content" id="content"></div>
+    </main>
+  </div>
+  <div class="modal-backdrop" id="modalBackdrop" hidden>
+    <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+  </div>
+  <div class="toast-wrap" id="toasts"></div>
+  <script src="app.js"></script>
+</body>
+</html>
