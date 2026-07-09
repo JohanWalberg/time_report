@@ -2564,7 +2564,7 @@ async function pageCalendar() {
             ${e.description ? `<div class="cal-desc small muted">${md(e.description)}</div>` : ''}</div>
           <div class="flex" style="gap:6px;align-self:flex-start;flex-shrink:0">
             <button class="btn sm" onclick='calLog(this, ${payload({ date: e.date, hours: e.hours, title: e.title })})'>＋ Log ${fmtH(e.hours)}h</button>
-            <button class="btn sm" onclick='calTicket(${payload({ title: e.title, description: e.description, location: e.location, date: e.date })})'>＋ Ticket</button>
+            <button class="btn sm" onclick='calTicket(${payload({ title: e.title, description: e.description, location: e.location, date: e.date, link: e.link })})'>＋ Ticket</button>
           </div>
         </div>`;
         }).join('')}
@@ -2580,7 +2580,7 @@ window.calTicket = function (ev) {
   const meta = [`From meeting: ${ev.title}`, `Date: ${ev.date}`];
   if (ev.location) meta.push(`Location: ${ev.location}`);
   parts.push(meta.join(' · '));
-  openTicketForm({ title: ev.title, description: parts.join('\n\n') });
+  openTicketForm({ title: ev.title, description: parts.join('\n\n'), link: ev.link || '' });
 };
 window.calLog = async function (btn, ev) {
   btn.disabled = true;

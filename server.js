@@ -696,7 +696,10 @@ app.get('/api/calendar/events', async (req, res) => {
       const hours = Math.max(Math.round(((endMs - e.start.ms) / 3600000) * 4) / 4, 0);
       // Google often stuffs a long HTML block / video link into DESCRIPTION — cap it
       const desc = (e.description || '').replace(/\s+$/, '').slice(0, 600);
-      events.push({ uid: e.uid || `${e.start.ms}`, title: e.summary || '(no title)', description: desc, location: (e.location || '').slice(0, 200), date: localDate(e.start.ms), start: hhmm(e.start.ms), end: hhmm(endMs), hours });
+      // best link to the meeting: the event URL, else a Meet link, else a URL in the location
+      const loc = (e.location || '').slice(0, 200);
+      const link = e.url || e.conference || (/^https?:\/\/\S+$/i.test(loc.trim()) ? loc.trim() : '');
+      events.push({ uid: e.uid || `${e.start.ms}`, title: e.summary || '(no title)', description: desc, location: loc, link, date: localDate(e.start.ms), start: hhmm(e.start.ms), end: hhmm(endMs), hours });
     }
     events.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
     res.json({ configured: true, events, skipped_recurring: skippedRecurring });
