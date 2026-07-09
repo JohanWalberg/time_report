@@ -730,6 +730,11 @@ app.get('/api/calendar/events', async (req, res) => {
       }
       for (const e of events) e.tickets = byUid[e.uid] || [];
     }
+    // mark meetings this user has already logged time for (source_uid + date)
+    const logged = new Set(
+      db.prepare("SELECT source_uid, date FROM time_entries WHERE user_id = ? AND source_uid IS NOT NULL AND date BETWEEN ? AND ?")
+        .all(req.user.id, from, to).map((r) => `${r.source_uid}|${r.date}`));
+    for (const e of events) e.logged = logged.has(`${e.uid}|${e.date}`);
     res.json({ configured: true, events, skipped_recurring: skippedRecurring });
   } catch (e) {
     console.error(e);
@@ -808,14 +813,18 @@ app.get('/api/time-entries', wrap((req, res) => {
     ORDER BY e.date DESC, e.id DESC LIMIT 500`).all(...params));
 }));
 app.post('/api/time-entries', wrap((req, res) => {
-  const { ticket_id = null, project_id = null, category = 'development', date, hours, description = '' } = req.body;
+  const { ticket_id = null, project_id = null, category = 'development', date, hours, description = '', source_uid = null } = req.body;
   if (!date || !hours) throw bad('date and hours are required');
   if (hours <= 0 || hours > 24) throw bad('Hours must be between 0 and 24');
+  // guard against double-logging the same calendar meeting
+  if (source_uid && db.prepare('SELECT 1 FROM time_entries WHERE user_id = ? AND source_uid = ? AND date = ?').get(req.user.id, source_uid, date)) {
+    throw bad('This meeting has already been logged.');
+  }
   // If a ticket is given but no project, inherit the ticket's project
   let proj = project_id;
   if (ticket_id && !proj) proj = (db.prepare('SELECT project_id FROM tickets WHERE id = ?').get(ticket_id) || {}).project_id || null;
-  const id = db.prepare("INSERT INTO time_entries (user_id, ticket_id, project_id, category, date, hours, description, status) VALUES (?,?,?,?,?,?,?,'submitted')")
-    .run(req.user.id, ticket_id, proj, category, date, hours, description).lastInsertRowid;
+  const id = db.prepare("INSERT INTO time_entries (user_id, ticket_id, project_id, category, date, hours, description, status, source_uid) VALUES (?,?,?,?,?,?,?,'submitted',?)")
+    .run(req.user.id, ticket_id, proj, category, date, hours, description, source_uid).lastInsertRowid;
   res.status(201).json(db.prepare('SELECT * FROM time_entries WHERE id = ?').get(id));
 }));
 app.patch('/api/time-entries/:id', wrap((req, res) => {

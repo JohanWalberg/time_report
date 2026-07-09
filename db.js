@@ -192,6 +192,10 @@ if (!ticketCols.includes('start_date')) db.exec('ALTER TABLE tickets ADD COLUMN 
 if (!userCols.includes('settings')) db.exec("ALTER TABLE users ADD COLUMN settings TEXT DEFAULT '{}'"); // per-user portal preferences (theme, size, accent)
 // per-user calendar feed (secret iCal URL) — kept out of publicUser, never sent to the client
 if (!userCols.includes('calendar_ics_url')) db.exec('ALTER TABLE users ADD COLUMN calendar_ics_url TEXT');
+// source_uid marks a time entry created from a specific calendar event, so the
+// calendar view knows a meeting was already logged and won't offer to log it again
+const timeCols = db.prepare('PRAGMA table_info(time_entries)').all().map((c) => c.name);
+if (!timeCols.includes('source_uid')) db.exec('ALTER TABLE time_entries ADD COLUMN source_uid TEXT');
 const projectCols = db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name);
 if (!projectCols.includes('sort_order')) db.exec('ALTER TABLE projects ADD COLUMN sort_order REAL'); // manual roadmap ordering
 {

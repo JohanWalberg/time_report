@@ -2569,7 +2569,9 @@ async function pageCalendar() {
             ${e.guests && e.guests.length ? `<div class="small muted cal-guests">👥 ${e.guests.map((g) => `<span title="${esc(rsvpLabel(g.status))}">${rsvpIcon(g.status)} ${esc(g.name)}</span>`).join(', ')}</div>` : ''}
             ${e.description ? `<div class="cal-desc small muted">${md(e.description)}</div>` : ''}</div>
           <div class="flex" style="gap:6px;align-self:flex-start;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
-            <button class="btn sm" title="${(e.tickets || [])[0] ? 'Logs against ' + esc(e.tickets[0].key) : 'Logs as a meeting (no ticket)'}" onclick='calLog(this, ${payload({ date: e.date, hours: e.hours, title: e.title, ticket_id: (e.tickets || [])[0] ? e.tickets[0].id : null, ticket_key: (e.tickets || [])[0] ? e.tickets[0].key : null })})'>＋ Log ${fmtH(e.hours)}h${(e.tickets || [])[0] ? ' → ' + esc(e.tickets[0].key) : ''}</button>
+            ${e.logged
+              ? `<button class="btn sm" disabled title="Time already logged for this meeting">✓ Logged</button>`
+              : `<button class="btn sm" title="${(e.tickets || [])[0] ? 'Logs against ' + esc(e.tickets[0].key) : 'Logs as a meeting (no ticket)'}" onclick='calLog(this, ${payload({ uid: e.uid, date: e.date, hours: e.hours, title: e.title, ticket_id: (e.tickets || [])[0] ? e.tickets[0].id : null, ticket_key: (e.tickets || [])[0] ? e.tickets[0].key : null })})'>＋ Log ${fmtH(e.hours)}h${(e.tickets || [])[0] ? ' → ' + esc(e.tickets[0].key) : ''}</button>`}
             ${(e.tickets || []).map((t) => `<button class="btn sm" onclick="openTicket(${t.id})" title="Open the ticket created from this meeting">🎫 ${esc(t.key)}</button>`).join('')}
             <button class="btn sm" onclick='calTicket(${payload({ uid: e.uid, title: e.title, description: e.description, location: e.location, date: e.date, start: e.start, end: e.end, hours: e.hours, link: e.link, organizer: e.organizer, guests: e.guests })})'>${(e.tickets || []).length ? '＋ Another ticket' : '＋ Ticket'}</button>
           </div>
@@ -2602,9 +2604,11 @@ window.calLog = async function (btn, ev) {
       user_id: S.currentUser.id, hours: ev.hours, date: ev.date,
       category: 'meetings', description: ev.title,
       ticket_id: ev.ticket_id || null, // attach to the meeting's ticket if one exists (project inherited server-side)
+      source_uid: ev.uid || null,       // marks the meeting as logged so it can't be logged twice
     } });
     btn.textContent = '✓ Logged';
-    btn.classList.add('primary');
+    btn.disabled = true;
+    btn.classList.remove('primary');
     toast(`Logged ${fmtH(ev.hours)}h${ev.ticket_key ? ' to ' + ev.ticket_key : ''} — ${ev.title}`);
   } catch (e) { toast(e.message, true); btn.disabled = false; }
 };
