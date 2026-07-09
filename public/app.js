@@ -2558,8 +2558,9 @@ async function pageCalendar() {
         <div class="small muted" style="margin-bottom:5px">${dayNames[i]} · ${d}</div>
         ${evs.map((e) => `<div class="cal-ev">
           <div style="flex:1;min-width:0"><b class="small">${esc(e.title)}</b>
-            <div class="small muted">${e.start}–${e.end} · ${fmtH(e.hours)}h</div></div>
-          <button class="btn sm" data-uid="${esc(e.uid)}" onclick='calLog(this, ${JSON.stringify({ date: e.date, hours: e.hours, title: e.title }).replace(/'/g, "&#39;")})'>＋ Log ${fmtH(e.hours)}h</button>
+            <div class="small muted">${e.start}–${e.end} · ${fmtH(e.hours)}h${e.location ? ' · 📍 ' + esc(e.location) : ''}</div>
+            ${e.description ? `<div class="cal-desc small muted">${md(e.description)}</div>` : ''}</div>
+          <button class="btn sm" style="align-self:flex-start" data-uid="${esc(e.uid)}" onclick='calLog(this, ${JSON.stringify({ date: e.date, hours: e.hours, title: e.title }).replace(/'/g, "&#39;")})'>＋ Log ${fmtH(e.hours)}h</button>
         </div>`).join('')}
       </div>`;
     }).join('') || '<div class="muted small" style="padding:12px 0">No meetings this week 🎉</div>'

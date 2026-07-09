@@ -694,7 +694,9 @@ app.get('/api/calendar/events', async (req, res) => {
       if (e.start.ms < lo || e.start.ms > hi) continue;
       const endMs = e.end ? e.end.ms : e.start.ms;
       const hours = Math.max(Math.round(((endMs - e.start.ms) / 3600000) * 4) / 4, 0);
-      events.push({ uid: e.uid || `${e.start.ms}`, title: e.summary || '(no title)', date: localDate(e.start.ms), start: hhmm(e.start.ms), end: hhmm(endMs), hours });
+      // Google often stuffs a long HTML block / video link into DESCRIPTION — cap it
+      const desc = (e.description || '').replace(/\s+$/, '').slice(0, 600);
+      events.push({ uid: e.uid || `${e.start.ms}`, title: e.summary || '(no title)', description: desc, location: (e.location || '').slice(0, 200), date: localDate(e.start.ms), start: hhmm(e.start.ms), end: hhmm(endMs), hours });
     }
     events.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
     res.json({ configured: true, events, skipped_recurring: skippedRecurring });
