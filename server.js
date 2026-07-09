@@ -615,7 +615,7 @@ app.delete('/api/project-statuses/:id', wrap((req, res) => {
 
 // ---------- Integrations (workspace-level connections; templates for now) ----------
 const INTEGRATION_PROVIDERS = ['openai', 'anthropic', 'linear', 'jira', 'gmail', 'gcal'];
-const SECRET_FIELDS = ['api_key', 'api_token'];
+const SECRET_FIELDS = ['api_key', 'api_token', 'ics_url']; // ics_url is a bearer secret — mask it too
 const maskConfig = (config) => {
   const c = { ...config };
   for (const f of SECRET_FIELDS) {
@@ -659,6 +659,50 @@ app.delete('/api/integrations/:provider', wrap((req, res) => {
   db.prepare('DELETE FROM integrations WHERE provider = ?').run(req.params.provider);
   res.json({ ok: true });
 }));
+
+// ---------- Google Calendar (via a secret iCal .ics feed) ----------
+// Fetches the configured calendar feed and returns timed events in [from, to] so the
+// user can turn meetings into time entries. Read-only; async → own error handling.
+const { parseIcs } = require('./lib/ical');
+app.get('/api/calendar/events', async (req, res) => {
+  try {
+    const row = db.prepare("SELECT config FROM integrations WHERE provider = 'gcal' AND enabled = 1").get();
+    const url = row && (JSON.parse(row.config || '{}').ics_url || '').trim();
+    if (!url) return res.json({ configured: false, events: [] });
+    if (!/^https:\/\/[^\s]+\.ics(\?|$)/i.test(url) && !/calendar\.google\.com/i.test(url)) {
+      return res.status(400).json({ error: 'The saved calendar link is not a valid iCal (.ics) URL' });
+    }
+    let text;
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!r.ok) return res.status(502).json({ error: `Calendar feed returned ${r.status}. Re-check the secret iCal URL.` });
+      text = await r.text();
+    } catch { return res.status(502).json({ error: 'Could not reach the calendar feed. Check the URL and try again.' }); }
+
+    const from = req.query.from || new Date().toISOString().slice(0, 10);
+    const to = req.query.to || from;
+    const lo = new Date(from + 'T00:00:00').getTime();
+    const hi = new Date(to + 'T23:59:59').getTime();
+    const localDate = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+    const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+
+    let skippedRecurring = 0;
+    const events = [];
+    for (const e of parseIcs(text)) {
+      if (e.recurring) { skippedRecurring++; continue; } // TODO: expand RRULE occurrences
+      if (e.start.allDay) continue; // all-day items aren't billable meetings
+      if (e.start.ms < lo || e.start.ms > hi) continue;
+      const endMs = e.end ? e.end.ms : e.start.ms;
+      const hours = Math.max(Math.round(((endMs - e.start.ms) / 3600000) * 4) / 4, 0);
+      events.push({ uid: e.uid || `${e.start.ms}`, title: e.summary || '(no title)', date: localDate(e.start.ms), start: hhmm(e.start.ms), end: hhmm(endMs), hours });
+    }
+    events.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+    res.json({ configured: true, events, skipped_recurring: skippedRecurring });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Something went wrong reading the calendar.' });
+  }
+});
 
 // ---------- Starred tickets (per user, shown in the sidebar) ----------
 app.get('/api/stars', wrap((req, res) => {

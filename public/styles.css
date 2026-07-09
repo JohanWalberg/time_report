@@ -372,6 +372,9 @@ select.list-edit:hover, select.list-edit:focus { border-color: var(--border); ba
 .md-body b { color: var(--text); }
 pre.md-code { background: var(--bg-2); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; overflow-x: auto; font-size: .8rem; margin: 0 0 10px; white-space: pre; font-family: ui-monospace, Consolas, monospace; }
 
+/* ===== Calendar events ===== */
+.cal-ev { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
+
 /* ===== Weekly highlights ===== */
 .hl-item { display: flex; gap: 9px; align-items: flex-start; padding: 7px 2px; border-bottom: 1px solid var(--border-soft); font-size: .9rem; }
 .hl-item:last-of-type { border-bottom: none; }

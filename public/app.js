@@ -2053,10 +2053,12 @@ async function pageTime() {
   $('#topbarActions').innerHTML = `
     <button class="btn ${timeTab === 'my' ? 'primary' : ''}" onclick="switchTimeTab('my')">🙋 My time</button>
     <button class="btn ${timeTab === 'grid' ? 'primary' : ''}" onclick="switchTimeTab('grid')">📅 Week grid</button>
+    <button class="btn ${timeTab === 'calendar' ? 'primary' : ''}" onclick="switchTimeTab('calendar')">🗓️ Calendar</button>
     <button class="btn ${timeTab === 'analytics' ? 'primary' : ''}" onclick="switchTimeTab('analytics')">📈 Analytics</button>
     ${isMgr ? `<button class="btn ${timeTab === 'approvals' ? 'primary' : ''}" onclick="switchTimeTab('approvals')">✅ Approvals</button>` : ''}`;
   if (timeTab === 'analytics') return pageTimeAnalytics();
   if (timeTab === 'grid') return pageTimeGrid();
+  if (timeTab === 'calendar') return pageCalendar();
   if (timeTab === 'approvals') return pageApprovals();
   await pageTimeMy();
   // append my heatmap under the My time view (non-blocking)
@@ -2516,6 +2518,67 @@ window.impBulkProj = (sel) => {
   toast(msg);
 };
 
+// ---- Calendar: pull meetings from the connected Google Calendar (.ics) feed ----
+let calWeek = null; // Monday of the week shown; null = current
+async function pageCalendar() {
+  const mon = calWeek || mondayOf(new Date());
+  const to = addDays(mon, 6);
+  $('#content').innerHTML = `
+    <div class="card">
+      <div class="spread mb">
+        <div class="flex">
+          <button class="btn sm" onclick="calNav(-7)">‹</button>
+          <b class="small" style="min-width:210px;text-align:center">${hlWeekLabel(mon)}</b>
+          <button class="btn sm" onclick="calNav(7)">›</button>
+          <button class="btn sm" onclick="calNav(0)">This week</button>
+        </div>
+        <a class="btn sm" href="#/integrations">⚙ Calendar settings</a>
+      </div>
+      <div id="calBody"><div class="muted small" style="padding:12px 0">Loading your calendar…</div></div>
+    </div>`;
+  let r;
+  try { r = await api(`/api/calendar/events?from=${mon}&to=${to}`); }
+  catch (e) { $('#calBody').innerHTML = `<div class="small" style="color:var(--red)">⚠ ${esc(e.message)}</div>`; return; }
+  if (!r.configured) {
+    $('#calBody').innerHTML = `<div class="empty" style="padding:24px"><div class="big">🗓️</div>
+      <p>No calendar connected yet. Paste your Google Calendar's <b>secret iCal URL</b> on the Integrations page and your meetings will show up here.</p>
+      <a class="btn primary" href="#/integrations">Connect Google Calendar</a></div>`;
+    return;
+  }
+  const byDay = {};
+  for (const e of r.events) (byDay[e.date] = byDay[e.date] || []).push(e);
+  const days = [...Array(7)].map((_, i) => addDays(mon, i));
+  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  $('#calBody').innerHTML = `
+    ${r.skipped_recurring ? `<div class="small muted mb">↻ ${r.skipped_recurring} recurring event(s) hidden — recurring meetings aren't imported yet.</div>` : ''}
+    ${r.events.length ? days.map((d, i) => {
+      const evs = byDay[d] || [];
+      if (!evs.length) return '';
+      return `<div style="margin-bottom:12px">
+        <div class="small muted" style="margin-bottom:5px">${dayNames[i]} · ${d}</div>
+        ${evs.map((e) => `<div class="cal-ev">
+          <div style="flex:1;min-width:0"><b class="small">${esc(e.title)}</b>
+            <div class="small muted">${e.start}–${e.end} · ${fmtH(e.hours)}h</div></div>
+          <button class="btn sm" data-uid="${esc(e.uid)}" onclick='calLog(this, ${JSON.stringify({ date: e.date, hours: e.hours, title: e.title }).replace(/'/g, "&#39;")})'>＋ Log ${fmtH(e.hours)}h</button>
+        </div>`).join('')}
+      </div>`;
+    }).join('') || '<div class="muted small" style="padding:12px 0">No meetings this week 🎉</div>'
+      : '<div class="muted small" style="padding:12px 0">No meetings this week 🎉</div>'}`;
+}
+window.calNav = (d) => { calWeek = d === 0 ? null : addDays(calWeek || mondayOf(new Date()), d); pageCalendar(); };
+window.calLog = async function (btn, ev) {
+  btn.disabled = true;
+  try {
+    await api('/api/time-entries', { method: 'POST', body: {
+      user_id: S.currentUser.id, hours: ev.hours, date: ev.date,
+      category: 'meetings', description: ev.title,
+    } });
+    btn.textContent = '✓ Logged';
+    btn.classList.add('primary');
+    toast(`Logged ${fmtH(ev.hours)}h — ${ev.title}`);
+  } catch (e) { toast(e.message, true); btn.disabled = false; }
+};
+
 // ---- Time analytics (management view) ----
 const hbar = (label, value, max, color = 'var(--brand)', suffix = 'h', extra = '') =>
   `<div class="bar-row"><span class="small" title="${esc(label)}">${esc(String(label).slice(0, 26))}</span>
@@ -2829,13 +2892,12 @@ const INTEGRATION_CATALOG = [
   },
   {
     id: 'gcal', icon: '📅', color: '#4cb782', name: 'Google Calendar',
-    desc: 'Meetings are the most under-reported time. Connect your calendar and events are pre-filled as "Meetings" time entries — you just confirm them.',
+    desc: 'Meetings are the most under-reported time. Paste your calendar\'s secret iCal (.ics) URL and your meetings appear on the Time page as one-click "Meetings" time entries.',
     fields: [
-      { k: 'calendar_id', label: 'Calendar ID', ph: 'you@company.com or team calendar ID' },
-      { k: 'default_project', label: 'Default project for meetings (optional)', ph: 'Internal' },
+      { k: 'ics_url', label: 'Secret iCal URL', type: 'password', ph: 'https://calendar.google.com/calendar/ical/…/basic.ics' },
     ],
-    actions: [],
-    note: 'Template — Google OAuth and .ics import are coming soon. Settings are stored for when it ships.',
+    actions: [{ label: '📅 Open calendar', onclick: "location.hash='#/time?tab=calendar'" }],
+    note: 'In Google Calendar: Settings → your calendar → "Integrate calendar" → copy the "Secret address in iCal format". Read-only; recurring events aren\'t imported yet.',
   },
 ];
 
