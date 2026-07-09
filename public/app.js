@@ -2556,17 +2556,32 @@ async function pageCalendar() {
       if (!evs.length) return '';
       return `<div style="margin-bottom:12px">
         <div class="small muted" style="margin-bottom:5px">${dayNames[i]} · ${d}</div>
-        ${evs.map((e) => `<div class="cal-ev">
+        ${evs.map((e) => {
+          const payload = (o) => JSON.stringify(o).replace(/'/g, '&#39;');
+          return `<div class="cal-ev">
           <div style="flex:1;min-width:0"><b class="small">${esc(e.title)}</b>
             <div class="small muted">${e.start}–${e.end} · ${fmtH(e.hours)}h${e.location ? ' · 📍 ' + esc(e.location) : ''}</div>
             ${e.description ? `<div class="cal-desc small muted">${md(e.description)}</div>` : ''}</div>
-          <button class="btn sm" style="align-self:flex-start" data-uid="${esc(e.uid)}" onclick='calLog(this, ${JSON.stringify({ date: e.date, hours: e.hours, title: e.title }).replace(/'/g, "&#39;")})'>＋ Log ${fmtH(e.hours)}h</button>
-        </div>`).join('')}
+          <div class="flex" style="gap:6px;align-self:flex-start;flex-shrink:0">
+            <button class="btn sm" onclick='calLog(this, ${payload({ date: e.date, hours: e.hours, title: e.title })})'>＋ Log ${fmtH(e.hours)}h</button>
+            <button class="btn sm" onclick='calTicket(${payload({ title: e.title, description: e.description, location: e.location, date: e.date })})'>＋ Ticket</button>
+          </div>
+        </div>`;
+        }).join('')}
       </div>`;
     }).join('') || '<div class="muted small" style="padding:12px 0">No meetings this week 🎉</div>'
       : '<div class="muted small" style="padding:12px 0">No meetings this week 🎉</div>'}`;
 }
 window.calNav = (d) => { calWeek = d === 0 ? null : addDays(calWeek || mondayOf(new Date()), d); pageCalendar(); };
+// open the ticket form pre-filled from a calendar event (meeting → action item)
+window.calTicket = function (ev) {
+  const parts = [];
+  if (ev.description) parts.push(ev.description);
+  const meta = [`From meeting: ${ev.title}`, `Date: ${ev.date}`];
+  if (ev.location) meta.push(`Location: ${ev.location}`);
+  parts.push(meta.join(' · '));
+  openTicketForm({ title: ev.title, description: parts.join('\n\n') });
+};
 window.calLog = async function (btn, ev) {
   btn.disabled = true;
   try {
