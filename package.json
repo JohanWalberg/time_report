@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "TimePort — time reporting & project management platform with AI assistant",
   "main": "server.js",
+  "engines": {
+    "node": ">=18 <=22"
+  },
   "scripts": {
     "start": "node server.js",
     "seed": "node db.js --reseed"

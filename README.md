@@ -35,6 +35,28 @@ set ANTHROPIC_API_KEY=sk-ant-...   (then restart)
 Without a key, the assistant runs in **offline mode** and still answers the most common
 questions (overdue tickets, missing reports, workload, project status) directly from the database.
 
+## Deploying to production (Render)
+
+The app stores everything — the SQLite database and uploaded files — under a data
+directory, so production needs a **persistent disk**; otherwise a redeploy wipes all data.
+The included [`render.yaml`](render.yaml) blueprint handles this:
+
+1. Render dashboard → **New → Blueprint** → point it at this repo.
+2. It provisions a **Starter** web service (persistent disks aren't available on Free)
+   with a 1 GB disk mounted at `/var/data`, and sets `DATA_DIR=/var/data` so the
+   database and uploads live on the disk.
+3. On first load, open the site and complete the one-time admin setup, then invite your team.
+
+Notes:
+- **`DATA_DIR`** (env var) — where the SQLite file and `uploads/` live. Defaults to `./data`
+  locally; set to the mounted disk path in production.
+- **Single instance only** — SQLite is one file on one disk, so don't enable horizontal
+  scaling. Fine for a single-team workload.
+- **AI**: set `ANTHROPIC_API_KEY` in the Render dashboard, or connect OpenAI/Anthropic on
+  the in-app Integrations page (stored in the database, so it persists on the disk).
+- HTTPS + `trust proxy` are already configured, so session cookies get the `Secure` flag
+  automatically behind Render's TLS proxy.
+
 ---
 
 ## Modules & pages

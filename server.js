@@ -39,7 +39,8 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-const UPLOAD_DIR = path.join(__dirname, 'data', 'uploads');
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data'); // persistent-disk mount in prod
+const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 // Block script/executable/renderable-HTML extensions — everything else (docs, images,
 // archives, PDFs) is fine and served as an attachment download anyway.

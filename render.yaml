@@ -1,0 +1,22 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploys TimePort as a single web service with a persistent disk for the SQLite
+# database and uploaded files. From the Render dashboard: New > Blueprint, point
+# it at this repo. The disk keeps data across deploys and restarts.
+services:
+  - type: web
+    name: timeport
+    runtime: node
+    plan: starter          # Starter or higher — persistent disks are not available on Free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: DATA_DIR
+        value: /var/data   # must match the disk mountPath below
+      - key: ANTHROPIC_API_KEY
+        sync: false         # optional — set in the dashboard, or configure a provider on the Integrations page instead
+    disk:
+      name: timeport-data
+      mountPath: /var/data
+      sizeGB: 1

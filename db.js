@@ -3,7 +3,10 @@ const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 
-const DB_PATH = path.join(__dirname, 'data', 'timeport.db');
+// DATA_DIR lets the database + uploads live on a mounted persistent disk in
+// production (e.g. Render's disk at /var/data). Defaults to ./data for local dev.
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const DB_PATH = path.join(DATA_DIR, 'timeport.db');
 fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 
 if (process.argv.includes('--reseed') && fs.existsSync(DB_PATH)) {
