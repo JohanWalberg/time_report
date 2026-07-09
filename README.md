@@ -116,9 +116,15 @@ and reports all know whether tickets in it count as completed.
   assignee and project per ticket or for all selected at once, and create new projects
   on the fly. Idempotent: imported tickets are tagged with a `linear:<ID>` label that
   skips duplicates on re-import.
-- **Integrations page** — workspace-level connection settings for Linear, Jira,
-  Gmail and Google Calendar (config templates; secrets are stored server-side and
-  masked in API responses). Managing integrations requires the manager/admin role.
+- **Integrations page** — workspace-level connection settings for Linear, Jira and
+  Gmail (config templates; secrets are stored server-side and masked in API
+  responses). Managing integrations requires the manager/admin role.
+- **Google Calendar (per-user)** — each user connects their **own** calendar in
+  **Settings** by pasting its secret iCal (.ics) URL (stored server-side, never
+  returned to the client). Their meetings then appear on **Time → Calendar**, where
+  each can be logged as a "meetings" time entry or turned into a ticket (pre-filled
+  with the meeting's title, notes, link, and the user as assignee). Read-only;
+  recurring events aren't expanded yet.
 
 ## User flows
 

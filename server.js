@@ -614,8 +614,8 @@ app.delete('/api/project-statuses/:id', wrap((req, res) => {
 }));
 
 // ---------- Integrations (workspace-level connections; templates for now) ----------
-const INTEGRATION_PROVIDERS = ['openai', 'anthropic', 'linear', 'jira', 'gmail', 'gcal'];
-const SECRET_FIELDS = ['api_key', 'api_token', 'ics_url']; // ics_url is a bearer secret — mask it too
+const INTEGRATION_PROVIDERS = ['openai', 'anthropic', 'linear', 'jira', 'gmail']; // calendar is per-user (in Settings), not a shared workspace integration
+const SECRET_FIELDS = ['api_key', 'api_token'];
 const maskConfig = (config) => {
   const c = { ...config };
   for (const f of SECRET_FIELDS) {
@@ -660,18 +660,30 @@ app.delete('/api/integrations/:provider', wrap((req, res) => {
   res.json({ ok: true });
 }));
 
-// ---------- Google Calendar (via a secret iCal .ics feed) ----------
-// Fetches the configured calendar feed and returns timed events in [from, to] so the
-// user can turn meetings into time entries. Read-only; async → own error handling.
+// ---------- Google Calendar (per-user secret iCal .ics feed) ----------
+// Each user connects their OWN calendar; the URL lives in users.calendar_ics_url and is
+// never returned to the client (only a connected yes/no). Read-only; async handlers.
 const { parseIcs } = require('./lib/ical');
+const isIcsUrl = (u) => /^https:\/\/\S+/i.test(u) && (/\.ics(\?|$)/i.test(u) || /calendar\.google\.com/i.test(u));
+
+app.get('/api/calendar/status', wrap((req, res) => {
+  res.json({ connected: !!req.user.calendar_ics_url });
+}));
+app.post('/api/calendar/connect', wrap((req, res) => {
+  const url = String(req.body.ics_url || '').trim();
+  if (!isIcsUrl(url)) throw bad('That is not a valid secret iCal (.ics) URL. Copy it from Google Calendar → Settings → your calendar → "Secret address in iCal format".');
+  db.prepare('UPDATE users SET calendar_ics_url = ? WHERE id = ?').run(url, req.user.id);
+  res.json({ connected: true });
+}));
+app.delete('/api/calendar/connect', wrap((req, res) => {
+  db.prepare('UPDATE users SET calendar_ics_url = NULL WHERE id = ?').run(req.user.id);
+  res.json({ connected: false });
+}));
+
 app.get('/api/calendar/events', async (req, res) => {
   try {
-    const row = db.prepare("SELECT config FROM integrations WHERE provider = 'gcal' AND enabled = 1").get();
-    const url = row && (JSON.parse(row.config || '{}').ics_url || '').trim();
+    const url = (req.user.calendar_ics_url || '').trim();
     if (!url) return res.json({ configured: false, events: [] });
-    if (!/^https:\/\/[^\s]+\.ics(\?|$)/i.test(url) && !/calendar\.google\.com/i.test(url)) {
-      return res.status(400).json({ error: 'The saved calendar link is not a valid iCal (.ics) URL' });
-    }
     let text;
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(10000) });

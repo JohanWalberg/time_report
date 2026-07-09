@@ -190,6 +190,8 @@ if (!ticketCols.includes('board_order')) db.exec('ALTER TABLE tickets ADD COLUMN
 if (!ticketCols.includes('link')) db.exec("ALTER TABLE tickets ADD COLUMN link TEXT DEFAULT ''");
 if (!ticketCols.includes('start_date')) db.exec('ALTER TABLE tickets ADD COLUMN start_date TEXT'); // optional: gives a ticket duration on the roadmap
 if (!userCols.includes('settings')) db.exec("ALTER TABLE users ADD COLUMN settings TEXT DEFAULT '{}'"); // per-user portal preferences (theme, size, accent)
+// per-user calendar feed (secret iCal URL) — kept out of publicUser, never sent to the client
+if (!userCols.includes('calendar_ics_url')) db.exec('ALTER TABLE users ADD COLUMN calendar_ics_url TEXT');
 const projectCols = db.prepare('PRAGMA table_info(projects)').all().map((c) => c.name);
 if (!projectCols.includes('sort_order')) db.exec('ALTER TABLE projects ADD COLUMN sort_order REAL'); // manual roadmap ordering
 {

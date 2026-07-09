@@ -2532,7 +2532,7 @@ async function pageCalendar() {
           <button class="btn sm" onclick="calNav(7)">›</button>
           <button class="btn sm" onclick="calNav(0)">This week</button>
         </div>
-        <a class="btn sm" href="#/integrations">⚙ Calendar settings</a>
+        <a class="btn sm" href="#/settings">⚙ Calendar settings</a>
       </div>
       <div id="calBody"><div class="muted small" style="padding:12px 0">Loading your calendar…</div></div>
     </div>`;
@@ -2541,8 +2541,8 @@ async function pageCalendar() {
   catch (e) { $('#calBody').innerHTML = `<div class="small" style="color:var(--red)">⚠ ${esc(e.message)}</div>`; return; }
   if (!r.configured) {
     $('#calBody').innerHTML = `<div class="empty" style="padding:24px"><div class="big">🗓️</div>
-      <p>No calendar connected yet. Paste your Google Calendar's <b>secret iCal URL</b> on the Integrations page and your meetings will show up here.</p>
-      <a class="btn primary" href="#/integrations">Connect Google Calendar</a></div>`;
+      <p>You haven't connected your calendar yet. Add your Google Calendar's <b>secret iCal URL</b> in Settings and your meetings show up here — private to you.</p>
+      <a class="btn primary" href="#/settings">Connect my calendar</a></div>`;
     return;
   }
   const byDay = {};
@@ -2580,7 +2580,8 @@ window.calTicket = function (ev) {
   const meta = [`From meeting: ${ev.title}`, `Date: ${ev.date}`];
   if (ev.location) meta.push(`Location: ${ev.location}`);
   parts.push(meta.join(' · '));
-  openTicketForm({ title: ev.title, description: parts.join('\n\n'), link: ev.link || '' });
+  // assign to the person whose calendar this is — the logged-in user
+  openTicketForm({ title: ev.title, description: parts.join('\n\n'), link: ev.link || '', assignee_id: S.currentUser.id });
 };
 window.calLog = async function (btn, ev) {
   btn.disabled = true;
@@ -2906,15 +2907,6 @@ const INTEGRATION_CATALOG = [
     actions: [],
     note: 'Template — the Google OAuth connection is coming soon. You can save the planned intake address already.',
   },
-  {
-    id: 'gcal', icon: '📅', color: '#4cb782', name: 'Google Calendar',
-    desc: 'Meetings are the most under-reported time. Paste your calendar\'s secret iCal (.ics) URL and your meetings appear on the Time page as one-click "Meetings" time entries.',
-    fields: [
-      { k: 'ics_url', label: 'Secret iCal URL', type: 'password', ph: 'https://calendar.google.com/calendar/ical/…/basic.ics' },
-    ],
-    actions: [{ label: '📅 Open calendar', onclick: "location.hash='#/time?tab=calendar'" }],
-    note: 'In Google Calendar: Settings → your calendar → "Integrate calendar" → copy the "Secret address in iCal format". Read-only; recurring events aren\'t imported yet.',
-  },
 ];
 
 async function pageIntegrations() {
@@ -3154,11 +3146,46 @@ async function pageSettings() {
         <div class="small muted" style="margin-top:6px">Used for buttons, links, progress bars and highlights.</div>
       </div>
     </div>
+    <div class="card mb" style="max-width:720px">
+      <div class="section-title">🗓️ My Google Calendar</div>
+      <div id="calSetting"><div class="small muted">Checking connection…</div></div>
+    </div>
     <div class="card" style="max-width:720px">
       <div class="section-title">About these settings</div>
       <p class="small muted">Preferences are saved to your account (${esc(S.currentUser.email)}) and follow you on any browser you sign in from. Changes apply immediately.</p>
     </div>`;
+  renderCalSetting();
 }
+
+// per-user calendar connect UI (secret iCal URL — stored server-side, shown only as connected/not)
+async function renderCalSetting() {
+  const el = $('#calSetting');
+  if (!el) return;
+  let connected = false;
+  try { connected = (await api('/api/calendar/status')).connected; } catch {}
+  el.innerHTML = connected
+    ? `<p class="small muted mb">✅ Your calendar is connected. Meetings appear on <a href="#/time?tab=calendar">Time → Calendar</a>, where you can log them or turn them into tickets.</p>
+       <button class="btn danger sm" onclick="calDisconnect()">Disconnect calendar</button>`
+    : `<p class="small muted mb">Connect your personal Google Calendar to log meetings and create tickets from them. Your calendar is private to you — it is never shared with the workspace.</p>
+       <form class="flex" style="gap:8px;flex-wrap:wrap" onsubmit="return calConnect(event)">
+         <input name="ics_url" type="password" required placeholder="Secret iCal URL (https://calendar.google.com/calendar/ical/…/basic.ics)" style="flex:1;min-width:280px" autocomplete="off">
+         <button class="btn primary">Connect</button>
+       </form>
+       <p class="small" style="color:var(--faint);margin-top:8px">Google Calendar → Settings → your calendar → "Integrate calendar" → copy the <b>Secret address in iCal format</b>. Read-only.</p>`;
+}
+window.calConnect = async function (e) {
+  e.preventDefault();
+  try {
+    await api('/api/calendar/connect', { method: 'POST', body: { ics_url: e.target.ics_url.value.trim() } });
+    toast('Calendar connected ✅');
+    renderCalSetting();
+  } catch (err) { toast(err.message, true); }
+  return false;
+};
+window.calDisconnect = async function () {
+  try { await api('/api/calendar/connect', { method: 'DELETE' }); toast('Calendar disconnected'); renderCalSetting(); }
+  catch (err) { toast(err.message, true); }
+};
 
 // ================= QUICK SEARCH (Ctrl+K) =================
 // Command palette over tickets / projects / people / pages. Tickets are fetched
