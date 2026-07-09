@@ -718,6 +718,18 @@ app.get('/api/calendar/events', async (req, res) => {
       events.push({ uid: e.uid || `${e.start.ms}`, title: e.summary || '(no title)', description: desc, location: loc, link, organizer, guests, date: localDate(e.start.ms), start: hhmm(e.start.ms), end: hhmm(endMs), hours });
     }
     events.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+    // attach any tickets already created from these meetings (tagged cal:<uid>)
+    const uidSet = new Set(events.map((e) => e.uid));
+    if (uidSet.size) {
+      const byUid = {};
+      for (const t of db.prepare("SELECT id, key, status, labels FROM tickets WHERE labels LIKE '%cal:%'").all()) {
+        for (const lbl of String(t.labels).split(',')) {
+          const m = lbl.trim().match(/^cal:(.+)$/i);
+          if (m && uidSet.has(m[1])) (byUid[m[1]] = byUid[m[1]] || []).push({ id: t.id, key: t.key, status: t.status });
+        }
+      }
+      for (const e of events) e.tickets = byUid[e.uid] || [];
+    }
     res.json({ configured: true, events, skipped_recurring: skippedRecurring });
   } catch (e) {
     console.error(e);

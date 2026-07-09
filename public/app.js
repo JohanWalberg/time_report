@@ -1376,7 +1376,8 @@ async function initLabelPicker(el, hidden, onChange) {
   let ready = false; // suppress onChange during initial render
   const sync = () => {
     hidden.value = selected.join(',');
-    chips.innerHTML = selected.map((l, i) => `<span class="chip">${esc(l)}<a class="tp-x" data-i="${i}" title="Remove">×</a></span>`).join('');
+    // system tags (cal:<uid>, linear:<id>) stay in the value but aren't shown as editable chips
+    chips.innerHTML = selected.map((l, i) => /^(cal|linear):/i.test(l) ? '' : `<span class="chip">${esc(l)}<a class="tp-x" data-i="${i}" title="Remove">×</a></span>`).join('');
     if (ready && onChange) onChange(hidden.value);
   };
   const renderMenu = () => {
@@ -2567,9 +2568,10 @@ async function pageCalendar() {
             ${e.organizer ? `<div class="small muted" style="margin-top:3px">👑 ${esc(e.organizer.name)} <span style="color:var(--faint)">· organizer</span></div>` : ''}
             ${e.guests && e.guests.length ? `<div class="small muted cal-guests">👥 ${e.guests.map((g) => `<span title="${esc(rsvpLabel(g.status))}">${rsvpIcon(g.status)} ${esc(g.name)}</span>`).join(', ')}</div>` : ''}
             ${e.description ? `<div class="cal-desc small muted">${md(e.description)}</div>` : ''}</div>
-          <div class="flex" style="gap:6px;align-self:flex-start;flex-shrink:0">
+          <div class="flex" style="gap:6px;align-self:flex-start;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
             <button class="btn sm" onclick='calLog(this, ${payload({ date: e.date, hours: e.hours, title: e.title })})'>＋ Log ${fmtH(e.hours)}h</button>
-            <button class="btn sm" onclick='calTicket(${payload({ title: e.title, description: e.description, location: e.location, date: e.date, start: e.start, end: e.end, hours: e.hours, link: e.link, organizer: e.organizer, guests: e.guests })})'>＋ Ticket</button>
+            ${(e.tickets || []).map((t) => `<button class="btn sm" onclick="openTicket(${t.id})" title="Open the ticket created from this meeting">🎫 ${esc(t.key)}</button>`).join('')}
+            <button class="btn sm" onclick='calTicket(${payload({ uid: e.uid, title: e.title, description: e.description, location: e.location, date: e.date, start: e.start, end: e.end, hours: e.hours, link: e.link, organizer: e.organizer, guests: e.guests })})'>${(e.tickets || []).length ? '＋ Another ticket' : '＋ Ticket'}</button>
           </div>
         </div>`;
         }).join('')}
@@ -2589,8 +2591,9 @@ window.calTicket = function (ev) {
   if (ev.link) L.push(`**Link:** ${ev.link}`);
   let body = L.join('\n');
   if (ev.description) body += `\n\n**Notes**\n${ev.description}`;
-  // assign to the person whose calendar this is — the logged-in user
-  openTicketForm({ title: ev.title, description: body, link: ev.link || '', assignee_id: S.currentUser.id });
+  // assign to the logged-in user, and tag with the meeting id so the calendar can
+  // link back to this ticket (cal:<uid> — hidden from the label chips)
+  openTicketForm({ title: ev.title, description: body, link: ev.link || '', assignee_id: S.currentUser.id, labels: ev.uid ? `cal:${ev.uid}` : '' });
 };
 window.calLog = async function (btn, ev) {
   btn.disabled = true;
