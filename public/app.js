@@ -2569,7 +2569,7 @@ async function pageCalendar() {
             ${e.description ? `<div class="cal-desc small muted">${md(e.description)}</div>` : ''}</div>
           <div class="flex" style="gap:6px;align-self:flex-start;flex-shrink:0">
             <button class="btn sm" onclick='calLog(this, ${payload({ date: e.date, hours: e.hours, title: e.title })})'>＋ Log ${fmtH(e.hours)}h</button>
-            <button class="btn sm" onclick='calTicket(${payload({ title: e.title, description: e.description, location: e.location, date: e.date, link: e.link })})'>＋ Ticket</button>
+            <button class="btn sm" onclick='calTicket(${payload({ title: e.title, description: e.description, location: e.location, date: e.date, start: e.start, end: e.end, hours: e.hours, link: e.link, organizer: e.organizer, guests: e.guests })})'>＋ Ticket</button>
           </div>
         </div>`;
         }).join('')}
@@ -2578,15 +2578,19 @@ async function pageCalendar() {
       : '<div class="muted small" style="padding:12px 0">No meetings this week 🎉</div>'}`;
 }
 window.calNav = (d) => { calWeek = d === 0 ? null : addDays(calWeek || mondayOf(new Date()), d); pageCalendar(); };
-// open the ticket form pre-filled from a calendar event (meeting → action item)
+// open the ticket form pre-filled from a calendar event (meeting → action item),
+// carrying the full meeting context into the ticket description as markdown
 window.calTicket = function (ev) {
-  const parts = [];
-  if (ev.description) parts.push(ev.description);
-  const meta = [`From meeting: ${ev.title}`, `Date: ${ev.date}`];
-  if (ev.location) meta.push(`Location: ${ev.location}`);
-  parts.push(meta.join(' · '));
+  const L = ['**📅 From calendar meeting**', `**Meeting:** ${ev.title}`,
+    `**When:** ${ev.date} · ${ev.start}–${ev.end} (${fmtH(ev.hours)}h)`];
+  if (ev.location) L.push(`**Location:** ${ev.location}`);
+  if (ev.organizer) L.push(`**Organizer:** ${ev.organizer.name}`);
+  if (ev.guests && ev.guests.length) L.push(`**Guests:** ${ev.guests.map((g) => `${rsvpIcon(g.status)} ${g.name}`).join(', ')}`);
+  if (ev.link) L.push(`**Link:** ${ev.link}`);
+  let body = L.join('\n');
+  if (ev.description) body += `\n\n**Notes**\n${ev.description}`;
   // assign to the person whose calendar this is — the logged-in user
-  openTicketForm({ title: ev.title, description: parts.join('\n\n'), link: ev.link || '', assignee_id: S.currentUser.id });
+  openTicketForm({ title: ev.title, description: body, link: ev.link || '', assignee_id: S.currentUser.id });
 };
 window.calLog = async function (btn, ev) {
   btn.disabled = true;
