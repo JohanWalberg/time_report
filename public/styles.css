@@ -376,6 +376,8 @@ pre.md-code { background: var(--bg-2); border: 1px solid var(--border); border-r
 .cal-ev { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; }
 .cal-desc { margin-top: 4px; max-height: 5.5em; overflow: hidden; opacity: .85; }
 .cal-desc p { margin: 0 0 3px; }
+.cal-guests { margin-top: 3px; line-height: 1.5; }
+.cal-guests span { white-space: nowrap; }
 
 /* ===== Weekly highlights ===== */
 .hl-item { display: flex; gap: 9px; align-items: flex-start; padding: 7px 2px; border-bottom: 1px solid var(--border-soft); font-size: .9rem; }

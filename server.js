@@ -711,7 +711,11 @@ app.get('/api/calendar/events', async (req, res) => {
       // best link to the meeting: the event URL, else a Meet link, else a URL in the location
       const loc = (e.location || '').slice(0, 200);
       const link = e.url || e.conference || (/^https?:\/\/\S+$/i.test(loc.trim()) ? loc.trim() : '');
-      events.push({ uid: e.uid || `${e.start.ms}`, title: e.summary || '(no title)', description: desc, location: loc, link, date: localDate(e.start.ms), start: hhmm(e.start.ms), end: hhmm(endMs), hours });
+      // guests = human attendees (exclude meeting rooms / resources); cap the list
+      const guests = (e.attendees || []).filter((a) => a.cutype !== 'RESOURCE' && a.cutype !== 'ROOM')
+        .slice(0, 30).map((a) => ({ name: a.name, status: a.status }));
+      const organizer = e.organizer ? { name: e.organizer.name } : null;
+      events.push({ uid: e.uid || `${e.start.ms}`, title: e.summary || '(no title)', description: desc, location: loc, link, organizer, guests, date: localDate(e.start.ms), start: hhmm(e.start.ms), end: hhmm(endMs), hours });
     }
     events.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
     res.json({ configured: true, events, skipped_recurring: skippedRecurring });

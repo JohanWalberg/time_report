@@ -2519,6 +2519,9 @@ window.impBulkProj = (sel) => {
 };
 
 // ---- Calendar: pull meetings from the connected Google Calendar (.ics) feed ----
+// RSVP status → compact indicator
+const rsvpIcon = (s) => ({ accepted: '✓', declined: '✗', tentative: '?' }[s] || '·');
+const rsvpLabel = (s) => ({ accepted: 'Accepted', declined: 'Declined', tentative: 'Tentative', 'needs-action': 'No response' }[s] || 'Invited');
 let calWeek = null; // Monday of the week shown; null = current
 async function pageCalendar() {
   const mon = calWeek || mondayOf(new Date());
@@ -2561,6 +2564,8 @@ async function pageCalendar() {
           return `<div class="cal-ev">
           <div style="flex:1;min-width:0"><b class="small">${esc(e.title)}</b>
             <div class="small muted">${e.start}–${e.end} · ${fmtH(e.hours)}h${e.location ? ' · 📍 ' + esc(e.location) : ''}</div>
+            ${e.organizer ? `<div class="small muted" style="margin-top:3px">👑 ${esc(e.organizer.name)} <span style="color:var(--faint)">· organizer</span></div>` : ''}
+            ${e.guests && e.guests.length ? `<div class="small muted cal-guests">👥 ${e.guests.map((g) => `<span title="${esc(rsvpLabel(g.status))}">${rsvpIcon(g.status)} ${esc(g.name)}</span>`).join(', ')}</div>` : ''}
             ${e.description ? `<div class="cal-desc small muted">${md(e.description)}</div>` : ''}</div>
           <div class="flex" style="gap:6px;align-self:flex-start;flex-shrink:0">
             <button class="btn sm" onclick='calLog(this, ${payload({ date: e.date, hours: e.hours, title: e.title })})'>＋ Log ${fmtH(e.hours)}h</button>
